@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
@@ -15,6 +16,9 @@ namespace YoutubeToMP3Converter;
 
 public sealed class MainWindow : Window
 {
+    private static readonly Encoding Utf8Strict = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+    private static readonly Encoding SystemAnsiEncoding = GetSystemAnsiEncoding();
+
     private readonly TextBox[] _urlBoxes;
     private readonly TextBox _outputBox;
     private readonly Button _chooseFolderButton;
@@ -356,8 +360,6 @@ public sealed class MainWindow : Window
             FileName = ytDlpPath,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
-            StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8,
             UseShellExecute = false,
             CreateNoWindow = true
         };
@@ -369,6 +371,8 @@ public sealed class MainWindow : Window
         startInfo.ArgumentList.Add("mp3");
         startInfo.ArgumentList.Add("--audio-quality");
         startInfo.ArgumentList.Add("0");
+        startInfo.ArgumentList.Add("--encoding");
+        startInfo.ArgumentList.Add("utf-8");
         startInfo.ArgumentList.Add("--embed-thumbnail");
         startInfo.ArgumentList.Add("--add-metadata");
         startInfo.ArgumentList.Add("--paths");
@@ -386,11 +390,95 @@ public sealed class MainWindow : Window
             throw new InvalidOperationException("無法啟動 yt-dlp。");
         }
 
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
+        var outputTask = ReadProcessStreamAsync(process.StandardOutput.BaseStream, token);
+        var errorTask = ReadProcessStreamAsync(process.StandardError.BaseStream, token);
 
-        await process.WaitForExitAsync(token);
+        try
+        {
+            await process.WaitForExitAsync(token);
+            await Task.WhenAll(outputTask, errorTask);
+        }
+        catch (OperationCanceledException)
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+
+            throw;
+        }
+
         return process.ExitCode;
+    }
+
+    private async Task ReadProcessStreamAsync(Stream stream, CancellationToken token)
+    {
+        var buffer = new byte[4096];
+        var pending = new List<byte>();
+
+        while (true)
+        {
+            var read = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), token);
+            if (read == 0)
+            {
+                break;
+            }
+
+            for (var index = 0; index < read; index++)
+            {
+                var value = buffer[index];
+                if (value == (byte)'\n')
+                {
+                    AppendDecodedLogLine(pending);
+                    pending.Clear();
+                    continue;
+                }
+
+                pending.Add(value);
+            }
+        }
+
+        AppendDecodedLogLine(pending);
+    }
+
+    private void AppendDecodedLogLine(List<byte> bytes)
+    {
+        while (bytes.Count > 0 && bytes[^1] == (byte)'\r')
+        {
+            bytes.RemoveAt(bytes.Count - 1);
+        }
+
+        if (bytes.Count == 0)
+        {
+            return;
+        }
+
+        AppendLog(DecodeProcessText(bytes.ToArray()));
+    }
+
+    private static string DecodeProcessText(byte[] bytes)
+    {
+        try
+        {
+            return Utf8Strict.GetString(bytes);
+        }
+        catch (DecoderFallbackException)
+        {
+            return SystemAnsiEncoding.GetString(bytes);
+        }
+    }
+
+    private static Encoding GetSystemAnsiEncoding()
+    {
+        try
+        {
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+            return Encoding.GetEncoding(CultureInfo.CurrentCulture.TextInfo.ANSICodePage);
+        }
+        catch
+        {
+            return Encoding.UTF8;
+        }
     }
 
     private void CheckTools()
