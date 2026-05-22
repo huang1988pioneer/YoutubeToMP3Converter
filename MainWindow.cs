@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
@@ -17,6 +18,7 @@ public sealed class MainWindow : Window
     private readonly TextBox[] _urlBoxes;
     private readonly TextBox _outputBox;
     private readonly Button _chooseFolderButton;
+    private readonly Button _clearUrlsButton;
     private readonly Button _convertButton;
     private readonly TextBlock _statusText;
     private readonly TextBox _logBox;
@@ -57,6 +59,15 @@ public sealed class MainWindow : Window
         };
         _chooseFolderButton.Click += ChooseFolderAsync;
 
+        _clearUrlsButton = new Button
+        {
+            Content = "清除網址",
+            MinWidth = 112,
+            MinHeight = 42,
+            HorizontalAlignment = HorizontalAlignment.Right
+        };
+        _clearUrlsButton.Click += ClearUrls;
+
         _convertButton = new Button
         {
             Content = "轉成 MP3",
@@ -87,12 +98,11 @@ public sealed class MainWindow : Window
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
             IsReadOnly = true,
-            FontFamily = new FontFamily("Menlo, Consolas, monospace"),
+            FontFamily = new FontFamily("Consolas, Microsoft JhengHei UI, monospace"),
             FontSize = 12,
-            Background = Brush.Parse("#FFFFFF"),
-            Foreground = Brush.Parse("#1F2937"),
-            BorderBrush = Brush.Parse("#D1D5DB"),
-            BorderThickness = new Thickness(1),
+            Background = Brush.Parse("#111827"),
+            Foreground = Brush.Parse("#F9FAFB"),
+            BorderThickness = new Thickness(0),
             Padding = new Thickness(14),
             MinHeight = 210
         };
@@ -154,11 +164,13 @@ public sealed class MainWindow : Window
 
         var actionRow = new Grid
         {
-            ColumnDefinitions = new ColumnDefinitions("*,Auto"),
-            ColumnSpacing = 14
+            ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto"),
+            ColumnSpacing = 10
         };
         actionRow.Children.Add(_statusText);
-        Grid.SetColumn(_convertButton, 1);
+        Grid.SetColumn(_clearUrlsButton, 1);
+        actionRow.Children.Add(_clearUrlsButton);
+        Grid.SetColumn(_convertButton, 2);
         actionRow.Children.Add(_convertButton);
         Grid.SetRow(actionRow, 2);
         body.Children.Add(actionRow);
@@ -238,6 +250,16 @@ public sealed class MainWindow : Window
             SaveOutputFolderIfValid();
             SetStatus("輸出資料夾已更新");
         }
+    }
+
+    private void ClearUrls(object? sender, RoutedEventArgs e)
+    {
+        foreach (var urlBox in _urlBoxes)
+        {
+            urlBox.Text = "";
+        }
+
+        SetStatus("網址已清除");
     }
 
     private async void ConvertOrCancelAsync(object? sender, RoutedEventArgs e)
@@ -334,9 +356,13 @@ public sealed class MainWindow : Window
             FileName = ytDlpPath,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
             UseShellExecute = false,
             CreateNoWindow = true
         };
+        startInfo.Environment["PYTHONIOENCODING"] = "utf-8";
+        startInfo.Environment["PYTHONUTF8"] = "1";
 
         startInfo.ArgumentList.Add("--extract-audio");
         startInfo.ArgumentList.Add("--audio-format");
@@ -412,6 +438,7 @@ public sealed class MainWindow : Window
     {
         _progressBar.IsIndeterminate = busy;
         _chooseFolderButton.IsEnabled = !busy;
+        _clearUrlsButton.IsEnabled = !busy;
         foreach (var urlBox in _urlBoxes)
         {
             urlBox.IsEnabled = !busy;
